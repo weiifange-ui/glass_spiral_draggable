@@ -271,6 +271,51 @@
       min-width: 34px;
       text-align: right;
     }
+
+    /*
+      每一片葉子（.ring）自己的呼吸燈：
+      顏色一樣走柔和低飽和度的四色循環（霧藍、淡綠、淺紫、淺玫瑰），12 秒一圈。
+      關鍵是 animation-delay 吃 --i：每一圈的延遲都不一樣，
+      所以不是整組同時閃爍，而是像波浪一樣，從內圈一路呼吸到外圈。
+      原本的陰影 box-shadow: 0 4px 12px rgba(0,0,0,0.25) 併進每個關鍵影格裡，
+      呼吸的光暈疊加在原本的陰影上面，不是取代它。
+    */
+    .ring {
+      animation: ring-breathe 12s ease-in-out infinite;
+      animation-delay: calc(var(--i) * 0.15s);
+    }
+
+    @keyframes ring-breathe {
+      0% {
+        box-shadow: 0 4px 12px rgba(0, 0, 0, 0.25), 0 0 14px 2px rgba(130, 170, 210, 0.3);
+      }
+      25% {
+        box-shadow: 0 4px 12px rgba(0, 0, 0, 0.25), 0 0 14px 2px rgba(150, 205, 180, 0.32);
+      }
+      50% {
+        box-shadow: 0 4px 12px rgba(0, 0, 0, 0.25), 0 0 14px 2px rgba(195, 165, 215, 0.3);
+      }
+      75% {
+        box-shadow: 0 4px 12px rgba(0, 0, 0, 0.25), 0 0 14px 2px rgba(230, 175, 185, 0.32);
+      }
+      100% {
+        box-shadow: 0 4px 12px rgba(0, 0, 0, 0.25), 0 0 14px 2px rgba(130, 170, 210, 0.3);
+      }
+    }
+
+    /* 拖曳時先暫停呼吸動畫（跟之前關掉 backdrop-filter 是同一個效能邏輯），
+       放開滑鼠再恢復，避免轉動 + 呼吸兩種動態同時運算造成卡頓 */
+    .spin-wrap.dragging .ring {
+      animation-play-state: paused;
+    }
+
+    /* 有人設定「減少動態效果」時，直接定格一個柔和的霧藍光暈，不播放動畫 */
+    @media (prefers-reduced-motion: reduce) {
+      .ring {
+        animation: none;
+        box-shadow: 0 4px 12px rgba(0, 0, 0, 0.25), 0 0 14px 2px rgba(130, 170, 210, 0.25);
+      }
+    }
   </style>
 </head>
 
@@ -354,16 +399,16 @@
       // 下面先留一個範例格式當參考，自己要用時把網址換掉就好。
       var images = {
         // 20: 'data:image/png;base64,iVBORw0KGgoAAAANS...'
-        45: 'https://picsum.photos/500/400/?random=1',
-        46: 'https://picsum.photos/500/400/?random=3',
-        47: 'https://picsum.photos/500/400/?random=5',
-        48: 'https://picsum.photos/500/400/?random=7',
-        49: 'https://picsum.photos/500/400/?random=9',
-        50: 'https://picsum.photos/500/400/?random=11',
-        52: 'https://picsum.photos/500/400/?random=13',
-        54: 'https://picsum.photos/500/400/?random=15',
-        57: 'https://picsum.photos/500/400/?random=17',
-        59: 'https://picsum.photos/500/400/?random=19'
+        45: 'https://picsum.photos/300/200/?random=1',
+        46: 'https://picsum.photos/300/200/?random=3',
+        47: 'https://picsum.photos/300/200/?random=5',
+        48: 'https://picsum.photos/300/200/?random=7',
+        49: 'https://picsum.photos/300/200/?random=9',
+        50: 'https://picsum.photos/300/200/?random=11',
+        52: 'https://picsum.photos/300/200/?random=13',
+        54: 'https://picsum.photos/300/200/?random=15',
+        57: 'https://picsum.photos/300/200/?random=17',
+        59: 'https://picsum.photos/300/200/?random=19'
 
       };
 
