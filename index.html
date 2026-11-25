@@ -101,7 +101,11 @@
       perspective: 1100px;
       display: flex;
       justify-content: center;
-      padding: 40px 0 60px;
+      /* 下面留白從 60px 加大到 180px：
+         .tree 因為 rotateX 往前傾、每一圈又用 translateZ 甩出半徑，
+         視覺範圍比瀏覽器排版算出來的高度大很多，
+         留白不夠就會被下面的控制面板擋到（或反過來蓋住控制面板） */
+      padding: 40px 0 180px;
     }
 
     /*
@@ -119,10 +123,25 @@
       user-select: none;
       transform-style: preserve-3d;
       transform: rotateY(var(--spin, 0deg));
+      /* 告訴瀏覽器「這個元素的 transform 之後會一直變」，
+         讓它提前準備好用顯卡加速，拖曳轉動時更順 */
+      will-change: transform;
     }
 
     .spin-wrap.dragging {
       cursor: grabbing;
+    }
+
+    /*
+      效能關鍵：backdrop-filter: blur(10px) 很吃效能，
+      因為瀏覽器要即時「看穿」格子背後重新模糊一次，
+      60 圈同時疊在一起、又在轉動中，每一禎都要重算，才是卡頓的真正原因
+      （不是圖片下載慢）。拖曳當下先關掉模糊，放開滑鼠才恢復，
+      使用者感覺不太出來，但效能差很多。
+    */
+    .spin-wrap.dragging .ring {
+      backdrop-filter: none;
+      -webkit-backdrop-filter: none;
     }
 
     /*
@@ -212,7 +231,8 @@
       gap: 16px;
       justify-content: center;
       align-items: center;
-      margin-top: 12px;
+      /* 從 12px 加大到 56px，跟 .stage 的留白一起把樹的視覺範圍讓出來 */
+      margin-top: 56px;
       padding: 14px 18px;
       background: var(--glass-bg);
       border: 1px solid var(--glass-border);
@@ -334,16 +354,16 @@
       // 下面先留一個範例格式當參考，自己要用時把網址換掉就好。
       var images = {
         // 20: 'data:image/png;base64,iVBORw0KGgoAAAANS...'
-        45: 'https://picsum.photos/300/200/?random=1',
-        46: 'https://picsum.photos/300/200/?random=3',
-        47: 'https://picsum.photos/300/200/?random=5',
-        48: 'https://picsum.photos/300/200/?random=7',
-        49: 'https://picsum.photos/300/200/?random=9',
-        50: 'https://picsum.photos/300/200/?random=11',
-        52: 'https://picsum.photos/300/200/?random=13',
-        54: 'https://picsum.photos/300/200/?random=15',
-        57: 'https://picsum.photos/300/200/?random=17',
-        59: 'https://picsum.photos/300/200/?random=19'
+        45: 'https://picsum.photos/500/400/?random=1',
+        46: 'https://picsum.photos/500/400/?random=3',
+        47: 'https://picsum.photos/500/400/?random=5',
+        48: 'https://picsum.photos/500/400/?random=7',
+        49: 'https://picsum.photos/500/400/?random=9',
+        50: 'https://picsum.photos/500/400/?random=11',
+        52: 'https://picsum.photos/500/400/?random=13',
+        54: 'https://picsum.photos/500/400/?random=15',
+        57: 'https://picsum.photos/500/400/?random=17',
+        59: 'https://picsum.photos/500/400/?random=19'
 
       };
 
