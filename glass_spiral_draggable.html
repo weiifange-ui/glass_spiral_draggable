@@ -1,0 +1,457 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>玻璃感旋轉螺旋（可拖曳版）</title>
+  <style>
+    :root {
+      --bg-top: #0b1a2e;
+      --bg-bottom: #4e93bb;
+      --ink: #eaf2fb;
+      --ink-soft: #9db3c9;
+      --glass-bg: rgba(255, 255, 255, 0.12);
+      --glass-border: rgba(255, 255, 255, 0.35);
+      color-scheme: dark;
+
+      /* 這幾個變數是數字輸入框要控制的目標，寫在 :root 上，
+         之後 JS 只要改這幾個變數，所有 .ring 會一起自動套用，不用重新產生元素 */
+      --ring-base-w: 90px;
+      --ring-w-step: 2.2px;
+      --ring-base-h: 28px;
+      --ring-h-step: 0.3px;
+      --ring-font-size: 11px;
+    }
+
+    @media (prefers-color-scheme: light) {
+      :root:not([data-theme="dark"]) {
+        --bg-top: #dbe8f5;
+        --bg-bottom: #f3f7fb;
+        --ink: #152033;
+        --ink-soft: #566a85;
+        --glass-bg: rgba(255, 255, 255, 0.45);
+        --glass-border: rgba(255, 255, 255, 0.7);
+      }
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    html,
+    body {
+      height: 100%;
+    }
+
+    body {
+      margin: 0;
+      min-height: 100%;
+      overflow-x: hidden;
+      /* translateZ 甩出去的範圍不算進版面寬度，但手機窄螢幕還是可能露出來，
+         鎖住橫向捲動，避免使用者在螺旋上滑動時，不小心把整個頁面橫向拖走 */
+
+      /* background: radial-gradient(circle at 50% 20%, var(--bg-bottom), var(--bg-top)); */
+
+      /* 背景圖片調淡成 0.5 透明度：不能直接對 body 用 opacity（那樣連文字、
+         螺旋、控制面板全部會一起變淡），所以是疊一層半透明深色濾鏡蓋在圖片「上面」。
+         background 可以疊好幾層，由上而下排列：
+           第一層 linear-gradient(...) → 半透明濾鏡（rgba 最後的 0.5 就是透明度）
+           第二層 url(...)             → 圖片本身
+         這樣只有圖片變淡，其他東西完全不受影響。 */
+      background:
+        linear-gradient(rgba(11, 26, 46, 0.5), rgba(20, 43, 71, 0.5)),
+        url("https://picsum.photos/2000/2000/?random=20") center center / cover no-repeat;
+      /* 背景固定貼在視窗上，不管內容多長、捲到哪裡都不會跑位，
+         這是上次驗證過沒問題的簡單寫法，不是容易出包的 ::before + z-index 那招 */
+      background-attachment: fixed;
+      color: var(--ink);
+      font-family: "Noto Sans TC", "PingFang TC", "Microsoft JhengHei", -apple-system, sans-serif;
+      padding-top: env(safe-area-inset-top, 0px);
+      padding-bottom: env(safe-area-inset-bottom, 0px);
+
+    }
+
+    .page {
+      max-width: 720px;
+      margin: 0 auto;
+      padding: 32px 20px 60px;
+    }
+
+    h1 {
+      font-size: 20px;
+      margin: 0 0 6px;
+    }
+
+    p.note {
+      color: var(--ink-soft);
+      font-size: 14px;
+      line-height: 1.7;
+      margin: 0 0 28px;
+    }
+
+    code {
+      background: rgba(255, 255, 255, 0.08);
+      padding: 1px 5px;
+      border-radius: 4px;
+    }
+
+    /* perspective 容器：只負責給 3D 視角深度，自己不是 flex */
+    .stage {
+      perspective: 1100px;
+      display: flex;
+      justify-content: center;
+      padding: 40px 0 60px;
+    }
+
+    /*
+      .spin-wrap —— 新加的這一層,專門負責「被拖曳」這件事
+      --------------------------------------------------
+      它本身不排版、也不決定螺旋長怎樣,唯一工作是套用一個
+      會被滑鼠/手指拖曳即時改變的 rotateY(var(--spin)),
+      把底下整組 .tree 一起轉動。
+      跟排版完全分開,所以拖曳邏輯不會影響 .tree 內部任何階的角度公式。
+    */
+    .spin-wrap {
+      cursor: grab;
+      touch-action: none;
+      /* 告訴瀏覽器「這個元素自己處理拖曳手勢」,不要用來滾動頁面 */
+      user-select: none;
+      transform-style: preserve-3d;
+      transform: rotateY(var(--spin, 0deg));
+    }
+
+    .spin-wrap.dragging {
+      cursor: grabbing;
+    }
+
+    /*
+      .tree —— 真正的 flex container
+      用 flex-direction: column 疊好每一圈的基本順序，跟角度、半徑無關，
+      純粹負責「誰在上面、誰在下面」。
+    */
+    .tree {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      transform-style: preserve-3d;
+      transform: rotateX(10deg);
+    }
+
+    /*
+      每一圈 .ring：
+        rotateY(calc(var(--i) * 38deg))               → 每一圈多轉 38 度
+        translateZ(calc(16px + var(--i) * 8px))        → 半徑隨 --i 線性遞增
+      36 圈 × 38 度 ≈ 1368 度，等於繞了快 4 整圈，
+      這才是圖片裡那種「好幾層纏繞」的關鍵：不是階數少，是「總旋轉角度」不夠。
+    */
+    .ring {
+      --i: 0;
+      width: calc(var(--ring-base-w) + var(--i) * var(--ring-w-step));
+      height: calc(var(--ring-base-h) + var(--i) * var(--ring-h-step));
+      margin-top: -18px;
+      /* height 現在跟著 --i 變大，所以淨露出高度（height - 18）會自動變大，
+         最內圈連得比較緊、最外圈連得比較鬆，連密度都跟著圈數演化 */
+
+      /* position: relative 讓裡面的 img 可以用 absolute 鋪滿這個格子，
+         而不會把格子本身撐大 */
+      position: relative;
+      background: var(--glass-bg);
+      border: 1px solid var(--glass-border);
+      border-radius: 8px;
+      backdrop-filter: blur(10px);
+      -webkit-backdrop-filter: blur(10px);
+      box-shadow: 0 4px 12px rgba(0, 0, 0, 0.25);
+
+      /* 要放文字進去，需要 flexbox 把文字置中：
+         注意這是每一個 .ring 內部的排版，跟外面用 transform 甩角度是兩件事 */
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: var(--ring-font-size);
+      color: var(--ink);
+      white-space: nowrap;
+      overflow: hidden;
+      padding: 0 6px;
+
+      transform: rotateY(calc(var(--i) * 38deg)) translateZ(calc(16px + var(--i) * 8px));
+    }
+
+    /* 圖片鋪滿整個格子，疊在文字「下面」當背景 */
+    .ring img {
+      position: absolute;
+      inset: 0;
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+      z-index: 0;
+    }
+
+    /* 文字包一層 span，蓋在圖片「上面」，加陰影讓字在圖片上也看得清楚 */
+    .ring .ring-text {
+      position: relative;
+      z-index: 1;
+      text-shadow: 0 1px 3px rgba(0, 0, 0, 0.6);
+    }
+
+    footer {
+      text-align: center;
+      color: var(--ink-soft);
+      font-size: 12px;
+      margin-top: 20px;
+    }
+
+    /*
+      控制面板：這裡才是真正的 flexbox 練習。
+      .controls 用 flex-wrap 讓兩組控制項在空間不夠時自動換行，
+      不像螺旋那區靠 transform 甩角度，這裡完全是一維空間分配的問題。
+    */
+    .controls {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 16px;
+      justify-content: center;
+      align-items: center;
+      margin-top: 12px;
+      padding: 14px 18px;
+      background: var(--glass-bg);
+      border: 1px solid var(--glass-border);
+      border-radius: 12px;
+      backdrop-filter: blur(10px);
+      -webkit-backdrop-filter: blur(10px);
+    }
+
+    /* 每一組控制（標籤 + 滑桿 + 數字）自己也是一個小 flex，
+       用 align-items: center 讓三個子元素高度不同也能對齊 */
+    .control-group {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-size: 13px;
+      color: var(--ink-soft);
+    }
+
+    .control-group input[type="range"] {
+      accent-color: var(--ink);
+    }
+
+    .control-group input[type="number"] {
+      width: 64px;
+      font: inherit;
+      color: var(--ink);
+      background: rgba(255, 255, 255, 0.08);
+      border: 1px solid var(--glass-border);
+      border-radius: 6px;
+      padding: 3px 6px;
+    }
+
+    .control-group .val {
+      font-family: "SFMono-Regular", Consolas, monospace;
+      color: var(--ink);
+      min-width: 34px;
+      text-align: right;
+    }
+  </style>
+</head>
+
+<body>
+  <div class="page">
+    <h1>玻璃感旋轉螺旋（可拖曳版）</h1>
+    <p class="note">
+      滑鼠在螺旋上按住左右拖曳（手機用手指滑），整組會跟著轉。
+
+    </p>
+
+    <div class="stage">
+      <div class="spin-wrap" id="spinWrap">
+        <div class="tree" id="tree"></div>
+      </div>
+    </div>
+
+    <div class="controls">
+      <div class="control-group">
+        <label for="totalInput">圈數</label>
+        <input type="number" id="totalInput" min="2" max="100" step="1" value="36">
+      </div>
+      <div class="control-group">
+        <label for="sensRange">拖曳速度</label>
+        <input type="range" id="sensRange" min="0.1" max="1.2" step="0.05" value="0.4">
+        <span class="val" id="sensVal">0.40</span>
+      </div>
+      <div class="control-group">
+        <label for="fontInput">字體大小</label>
+        <input type="number" id="fontInput" min="6" max="24" step="1" value="11">
+        <span class="val">px</span>
+      </div>
+      <div class="control-group">
+        <label for="widthInput">格子寬度</label>
+        <input type="number" id="widthInput" min="20" max="300" step="5" value="90">
+        <span class="val">px</span>
+      </div>
+      <div class="control-group">
+        <label for="heightInput">格子高度</label>
+        <input type="number" id="heightInput" min="10" max="100" step="2" value="28">
+        <span class="val">px</span>
+      </div>
+    </div>
+
+    <footer>拖曳轉整組 ・ flex-direction: column 排順序 ・ translateZ 半徑線性遞增 ・ 玻璃感配色 ・ flex-wrap 控制面板</footer>
+  </div>
+
+  <script>
+    (function () {
+      var tree = document.getElementById('tree');
+      var spinWrap = document.getElementById('spinWrap');
+
+      var total = 60;        // 圈數：越多，螺旋看起來越連續、越細緻
+      var sensitivity = 0.4; // 拖 1px 轉幾度，數字越大轉得越快
+
+      // 想在第幾圈顯示文字，就寫第幾圈的數字當 key（從 1 算起），
+      // 不用從頭依序填，中間沒寫到的圈數會自動顯示空白，不用補空字串佔位。
+      var texts = {
+        15: '故事的小黃花',
+        16: '從出生那年就飄著',
+        20: '翹課的那一天',
+        21: '花落的那一天',
+        29: '颳風這天',
+        31: '但偏偏',
+        32: '雨漸漸',
+        36: '等到放晴的那天',
+        37: '也許我會比較好一點',
+        38: '從前從前',
+        40: '但偏偏',
+        41: '風漸漸',
+        42: '把距離吹得好遠',
+
+
+        // 繼續往下加：18: '...', 19: '...' 這樣接著寫就好
+      };
+
+      // 圖片放在這裡，寫法跟 texts 一模一樣：key 是第幾圈，value 是圖片網址。
+      // 重要：發布出去的頁面不能載入外部圖片網址（會被擋下來，圖片顯示不出來），
+      // 這裡只能放「data:image/...;base64,...」開頭的 data URI，
+      // 或是用 Artifact 工具上傳圖片後拿到的 /_blob/xxxx 連結。
+      // 下面先留一個範例格式當參考，自己要用時把網址換掉就好。
+      var images = {
+        // 20: 'data:image/png;base64,iVBORw0KGgoAAAANS...'
+        45: 'https://picsum.photos/300/200/?random=1',
+        46: 'https://picsum.photos/300/200/?random=3',
+        47: 'https://picsum.photos/300/200/?random=5',
+        48: 'https://picsum.photos/300/200/?random=7',
+        49: 'https://picsum.photos/300/200/?random=9',
+        50: 'https://picsum.photos/300/200/?random=11',
+        52: 'https://picsum.photos/300/200/?random=13',
+        54: 'https://picsum.photos/300/200/?random=15',
+        57: 'https://picsum.photos/300/200/?random=17',
+        59: 'https://picsum.photos/300/200/?random=19'
+
+      };
+
+      // 把產生圈圈拆成函式，方便圈數滑桿改動時可以重新跑一次
+      function buildRings() {
+        tree.innerHTML = '';
+        for (var i = 0; i < total; i++) {
+          var ring = document.createElement('div');
+          ring.className = 'ring';
+          ring.style.setProperty('--i', i);
+
+          var imgSrc = images[i + 1];
+          if (imgSrc) {
+            var img = document.createElement('img');
+            img.src = imgSrc;
+            img.alt = '';
+            ring.appendChild(img);
+          }
+
+          var label = texts[i + 1];
+          if (label) {
+            var span = document.createElement('span');
+            span.className = 'ring-text';
+            span.textContent = label;
+            ring.appendChild(span);
+          }
+
+          tree.appendChild(ring);
+        }
+      }
+      buildRings();
+
+      /*
+        拖曳邏輯：跟排版、跟螺旋怎麼長完全無關，
+        單純是「滑鼠移動了多少 px → 換算成多少度 → 寫回 CSS 變數 --spin」。
+      */
+      var dragging = false;
+      var startX = 0;
+      var startDeg = 0;
+      var currentDeg = 0;
+
+      spinWrap.addEventListener('pointerdown', function (e) {
+        dragging = true;
+        startX = e.clientX;
+        startDeg = currentDeg;
+        spinWrap.classList.add('dragging');
+        spinWrap.setPointerCapture(e.pointerId);
+      });
+
+      spinWrap.addEventListener('pointermove', function (e) {
+        if (!dragging) return;
+        var dx = e.clientX - startX;
+        currentDeg = startDeg + dx * sensitivity;
+        spinWrap.style.setProperty('--spin', currentDeg + 'deg');
+      });
+
+      function endDrag() {
+        dragging = false;
+        spinWrap.classList.remove('dragging');
+      }
+      spinWrap.addEventListener('pointerup', endDrag);
+      spinWrap.addEventListener('pointercancel', endDrag);
+
+      /*
+        底下的控制面板（flex-wrap 練習那一塊）：
+        只負責「讀使用者調了什麼 → 更新上面這兩個變數，或改 :root 的 CSS 變數」，
+        跟螺旋、拖曳的核心邏輯分開放，之後想拿掉面板也不影響主體。
+        字體大小、格子寬高這三個不需要重建圈圈——
+        因為 .ring 的 CSS 本來就用 var(--ring-xxx) 讀值，
+        只要改 :root 上的變數，所有已經存在的 .ring 會自動一起套用新數值。
+      */
+      var root = document.documentElement;
+
+      var totalInput = document.getElementById('totalInput');
+      var sensRange = document.getElementById('sensRange');
+      var sensVal = document.getElementById('sensVal');
+      var fontInput = document.getElementById('fontInput');
+      var widthInput = document.getElementById('widthInput');
+      var heightInput = document.getElementById('heightInput');
+
+      // 數字輸入框用 change（打完按 Enter 或跳出欄位才觸發），
+      // 比 input（每打一個字就觸發）更適合數字輸入，不會打到一半就重建
+      totalInput.addEventListener('change', function (e) {
+        var v = parseInt(e.target.value, 10);
+        if (isNaN(v) || v < 2) v = 2;
+        total = v;
+        e.target.value = v;
+        buildRings();
+      });
+
+      sensRange.addEventListener('input', function (e) {
+        sensitivity = parseFloat(e.target.value);
+        sensVal.textContent = sensitivity.toFixed(2);
+      });
+
+      fontInput.addEventListener('change', function (e) {
+        root.style.setProperty('--ring-font-size', e.target.value + 'px');
+      });
+
+      widthInput.addEventListener('change', function (e) {
+        root.style.setProperty('--ring-base-w', e.target.value + 'px');
+      });
+
+      heightInput.addEventListener('change', function (e) {
+        root.style.setProperty('--ring-base-h', e.target.value + 'px');
+      });
+    })();
+  </script>
+</body>
+
+</html>
