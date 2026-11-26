@@ -122,7 +122,13 @@
       /* 告訴瀏覽器「這個元素自己處理拖曳手勢」,不要用來滾動頁面 */
       user-select: none;
       transform-style: preserve-3d;
-      transform: rotateY(var(--spin, 0deg));
+      /*
+        米字型全方向旋轉的關鍵：同時疊加 rotateX 跟 rotateY 兩個軸，
+        --spinX 由「上下拖曳」控制（像翻滾），--spin 由「左右拖曳」控制（像左右轉），
+        兩個角度沒有上限、沒有鎖軸，隨便往哪個方向拖都會疊加對應的角度，
+        感覺就像在轉一顆球，而不是只能繞單一軸心轉。
+      */
+      transform: rotateX(var(--spinX, 10deg)) rotateY(var(--spin, 0deg));
       /* 告訴瀏覽器「這個元素的 transform 之後會一直變」，
          讓它提前準備好用顯卡加速，拖曳轉動時更順 */
       will-change: transform;
@@ -154,7 +160,8 @@
       flex-direction: column;
       align-items: center;
       transform-style: preserve-3d;
-      transform: rotateX(10deg);
+      /* 原本固定的 rotateX(10deg) 傾斜搬到 .spin-wrap 的 --spinX 初始值去了，
+         現在 .tree 自己不做任何旋轉，旋轉完全交給外層的 .spin-wrap 處理 */
     }
 
     /*
@@ -442,18 +449,26 @@
       buildRings();
 
       /*
-        拖曳邏輯：跟排版、跟螺旋怎麼長完全無關，
-        單純是「滑鼠移動了多少 px → 換算成多少度 → 寫回 CSS 變數 --spin」。
+        拖曳邏輯（米字型全方向版）：
+        左右拖曳 → 改變 --spin（繞 Y 軸轉，像左右旋轉）
+        上下拖曳 → 改變 --spinX（繞 X 軸轉，像前後翻滾）
+        兩個角度各自獨立累加、沒有上限也不會互相鎖住，
+        往斜角拖曳就是兩個角度同時變化，疊加起來的視覺效果就是「任何方向都能轉」。
       */
       var dragging = false;
       var startX = 0;
+      var startY = 0;
       var startDeg = 0;
+      var startDegX = 0;
       var currentDeg = 0;
+      var currentDegX = 10; // 對應原本 .tree 固定的 rotateX(10deg) 起始傾斜角度
 
       spinWrap.addEventListener('pointerdown', function (e) {
         dragging = true;
         startX = e.clientX;
+        startY = e.clientY;
         startDeg = currentDeg;
+        startDegX = currentDegX;
         spinWrap.classList.add('dragging');
         spinWrap.setPointerCapture(e.pointerId);
       });
@@ -461,8 +476,12 @@
       spinWrap.addEventListener('pointermove', function (e) {
         if (!dragging) return;
         var dx = e.clientX - startX;
+        var dy = e.clientY - startY;
         currentDeg = startDeg + dx * sensitivity;
+        // 往下拖 → 角度減少（像把球的上緣往後翻）；往上拖則相反，符合直覺的拖曳方向
+        currentDegX = startDegX - dy * sensitivity;
         spinWrap.style.setProperty('--spin', currentDeg + 'deg');
+        spinWrap.style.setProperty('--spinX', currentDegX + 'deg');
       });
 
       function endDrag() {
