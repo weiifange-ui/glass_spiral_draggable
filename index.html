@@ -109,6 +109,18 @@
     }
 
     /*
+      .zoom-wrap：專門只管「縮放」這一件事，跟 .spin-wrap 的旋轉矩陣完全分開。
+      旋轉是 JS 直接寫 matrix3d 進 .spin-wrap 的 transform，
+      如果把縮放也塞進同一個矩陣，每次滾輪縮放都要重新算整個矩陣，容易出錯；
+      拆成兩層，縮放只套一個單純的 scale()，兩邊互不影響，各自好維護。
+      transition 讓滾輪一格一格跳動的縮放幅度，變成滑順的過渡，不會頓頓的。
+    */
+    .zoom-wrap {
+      transform: scale(var(--zoom, 1));
+      transition: transform 0.08s ease-out;
+    }
+
+    /*
       .spin-wrap —— 新加的這一層,專門負責「被拖曳」這件事
       --------------------------------------------------
       它本身不排版、也不決定螺旋長怎樣,唯一工作是套用一個
@@ -281,47 +293,31 @@
     }
 
     /*
-      每一片葉子（.ring）自己的呼吸燈：
-      顏色一樣走柔和低飽和度的四色循環（霧藍、淡綠、淺紫、淺玫瑰），12 秒一圈。
-      關鍵是 animation-delay 吃 --i：每一圈的延遲都不一樣，
-      所以不是整組同時閃爍，而是像波浪一樣，從內圈一路呼吸到外圈。
-      原本的陰影 box-shadow: 0 4px 12px rgba(0,0,0,0.25) 併進每個關鍵影格裡，
-      呼吸的光暈疊加在原本的陰影上面，不是取代它。
+      燈框改成「滑鼠懸停觸發」，不再自動呼吸，分三個等級：
+        .is-primary   → 滑鼠正停在上面的那一圈：放大 + 最亮的燈框（主燈）
+        .is-secondary → 左右緊鄰的各一圈：維持原尺寸，燈框中等亮度（次燈）
+        （沒有 class 的其他圈）→ 完全不受影響，連再外一圈都不亮，維持原本的樣子
+      --ring-scale 預設是 1（原尺寸），hover 到的那一圈由 JS 把它調大。
     */
     .ring {
-      animation: ring-breathe 12s ease-in-out infinite;
-      animation-delay: calc(var(--i) * 0.15s);
+      /* scale(x, y) 兩個軸分開給變數，寬度、高度各自獨立可調 */
+
+      transform: rotateY(calc(var(--i) * 38deg)) translateZ(calc(16px + var(--i) * 8px)) scale(var(--ring-scale-x, 1), var(--ring-scale-y, 1));
+      transition: transform 0.25s ease, box-shadow 0.25s ease;
     }
 
-    @keyframes ring-breathe {
-      0% {
-        box-shadow: 0 4px 12px rgba(0, 0, 0, 0.25), 0 0 14px 2px rgba(130, 170, 210, 0.3);
-      }
-      25% {
-        box-shadow: 0 4px 12px rgba(0, 0, 0, 0.25), 0 0 14px 2px rgba(150, 205, 180, 0.32);
-      }
-      50% {
-        box-shadow: 0 4px 12px rgba(0, 0, 0, 0.25), 0 0 14px 2px rgba(195, 165, 215, 0.3);
-      }
-      75% {
-        box-shadow: 0 4px 12px rgba(0, 0, 0, 0.25), 0 0 14px 2px rgba(230, 175, 185, 0.32);
-      }
-      100% {
-        box-shadow: 0 4px 12px rgba(0, 0, 0, 0.25), 0 0 14px 2px rgba(130, 170, 210, 0.3);
-      }
+    .ring.is-secondary {
+      box-shadow: 0 4px 12px rgba(0, 0, 0, 0.25), 0 0 16px 4px rgba(130, 170, 210, 0.35);
     }
 
-    /* 拖曳時先暫停呼吸動畫（跟之前關掉 backdrop-filter 是同一個效能邏輯），
-       放開滑鼠再恢復，避免轉動 + 呼吸兩種動態同時運算造成卡頓 */
-    .spin-wrap.dragging .ring {
-      animation-play-state: paused;
+    .ring.is-primary {
+      box-shadow: 0 6px 20px rgba(0, 0, 0, 0.35), 0 0 34px 10px rgba(130, 170, 210, 0.7);
     }
 
-    /* 有人設定「減少動態效果」時，直接定格一個柔和的霧藍光暈，不播放動畫 */
+    /* 有人設定「減少動態效果」時，放大的過渡動畫直接跳過，瞬間切換不漸變 */
     @media (prefers-reduced-motion: reduce) {
       .ring {
-        animation: none;
-        box-shadow: 0 4px 12px rgba(0, 0, 0, 0.25), 0 0 14px 2px rgba(130, 170, 210, 0.25);
+        transition: none;
       }
     }
   </style>
@@ -336,8 +332,10 @@
     </p>
 
     <div class="stage">
-      <div class="spin-wrap" id="spinWrap">
-        <div class="tree" id="tree"></div>
+      <div class="zoom-wrap" id="zoomWrap">
+        <div class="spin-wrap" id="spinWrap">
+          <div class="tree" id="tree"></div>
+        </div>
       </div>
     </div>
 
@@ -366,6 +364,16 @@
         <input type="number" id="heightInput" min="10" max="100" step="2" value="28">
         <span class="val">px</span>
       </div>
+      <div class="control-group">
+        <label for="hoverWInput">互動寬度倍率</label>
+        <input type="number" id="hoverWInput" min="0.5" max="5" step="0.1" value="1">
+        <span class="val">x</span>
+      </div>
+      <div class="control-group">
+        <label for="hoverHInput">互動高度倍率</label>
+        <input type="number" id="hoverHInput" min="0.5" max="5" step="0.1" value="2">
+        <span class="val">x</span>
+      </div>
     </div>
 
     <footer>拖曳轉整組 ・ flex-direction: column 排順序 ・ translateZ 半徑線性遞增 ・ 玻璃感配色 ・ flex-wrap 控制面板</footer>
@@ -378,6 +386,8 @@
 
       var total = 60;        // 圈數：越多，螺旋看起來越連續、越細緻
       var sensitivity = 0.4; // 拖 1px 轉幾度，數字越大轉得越快
+      var hoverScaleX = 4;    // 懸停時的寬度倍率，由下面的輸入框即時調整
+      var hoverScaleY = 8;    // 懸停時的高度倍率，由下面的輸入框即時調整
 
       // 想在第幾圈顯示文字，就寫第幾圈的數字當 key（從 1 算起），
       // 不用從頭依序填，中間沒寫到的圈數會自動顯示空白，不用補空字串佔位。
@@ -407,23 +417,66 @@
       // 下面先留一個範例格式當參考，自己要用時把網址換掉就好。
       var images = {
         // 20: 'data:image/png;base64,iVBORw0KGgoAAAANS...'
-        45: 'https://picsum.photos/300/200/?random=1',
-        46: 'https://picsum.photos/300/200/?random=3',
-        47: 'https://picsum.photos/300/200/?random=5',
-        48: 'https://picsum.photos/300/200/?random=7',
-        49: 'https://picsum.photos/300/200/?random=9',
-        50: 'https://picsum.photos/300/200/?random=11',
-        52: 'https://picsum.photos/300/200/?random=13',
-        54: 'https://picsum.photos/300/200/?random=15',
-        57: 'https://picsum.photos/300/200/?random=17',
-        59: 'https://picsum.photos/300/200/?random=19'
+        45: 'https://picsum.photos/800/600/?random=1',
+        46: 'https://picsum.photos/800/600/?random=3',
+        47: 'https://picsum.photos/800/600/?random=5',
+        48: 'https://picsum.photos/800/600/?random=7',
+        49: 'https://picsum.photos/800/600/?random=9',
+        50: 'https://picsum.photos/800/600/?random=11',
+        52: 'https://picsum.photos/800/600/?random=13',
+        54: 'https://picsum.photos/800/600/?random=15',
+        57: 'https://picsum.photos/800/600/?random=17',
+        59: 'https://picsum.photos/800/600/?random=19'
 
       };
 
       // 把產生圈圈拆成函式，方便圈數滑桿改動時可以重新跑一次
+      /*
+        燈框懸停邏輯：
+        清掉所有圈的 class → 把滑鼠所在那一圈標成 is-primary（主燈，順便放大）
+        → 左右緊鄰各一圈標成 is-secondary（次燈）→ 再外面的圈完全不動。
+        用 let i（不是 var i）宣告迴圈變數，是因為 mouseenter 的 callback
+        要等「使用者真的把滑鼠移上去」才會執行，是晚一點才觸發的，
+        如果用 var，所有圈的 callback 到時候都會指向同一個、跑完迴圈後的 i 值，
+        而不是各自建立當下那一圈的編號。
+      */
+      function clearRingHighlights() {
+        var all = tree.querySelectorAll('.ring');
+        for (var k = 0; k < all.length; k++) {
+          all[k].classList.remove('is-primary', 'is-secondary');
+          all[k].style.setProperty('--ring-scale-x', 1);
+          all[k].style.setProperty('--ring-scale-y', 1);
+          all[k].style.zIndex = '';
+        }
+      }
+
+      function highlightRing(idx) {
+        var all = tree.querySelectorAll('.ring');
+        clearRingHighlights();
+
+        var main = all[idx];
+        if (main) {
+          main.classList.add('is-primary');
+          main.style.setProperty('--ring-scale-x', hoverScaleX);
+          main.style.setProperty('--ring-scale-y', hoverScaleY);
+          main.style.zIndex = 10;
+        }
+        var prevRing = all[idx - 1];
+        if (prevRing) {
+          prevRing.classList.add('is-secondary');
+          prevRing.style.zIndex = 5;
+        }
+        var nextRing = all[idx + 1];
+        if (nextRing) {
+          nextRing.classList.add('is-secondary');
+          nextRing.style.zIndex = 5;
+        }
+        // idx - 2、idx + 2（再外面那一圈）故意什麼都不做，維持原樣不亮
+      }
+
       function buildRings() {
         tree.innerHTML = '';
-        for (var i = 0; i < total; i++) {
+        for (let i = 0; i < total; i++) {
           var ring = document.createElement('div');
           ring.className = 'ring';
           ring.style.setProperty('--i', i);
@@ -443,6 +496,13 @@
             span.textContent = label;
             ring.appendChild(span);
           }
+
+          ring.addEventListener('mouseenter', function () {
+            highlightRing(i);
+          });
+          ring.addEventListener('mouseleave', function () {
+            clearRingHighlights();
+          });
 
           tree.appendChild(ring);
         }
@@ -503,6 +563,26 @@
       spinWrap.addEventListener('pointercancel', endDrag);
 
       /*
+        滾輪縮放：滑鼠停在螺旋上滾動滾輪（手機用雙指縮放手勢通常不觸發 wheel，
+        這裡先做桌機滑鼠滾輪版），往前滾放大、往後滾縮小。
+        只改 --zoom 這個 CSS 變數，完全不碰旋轉用的 currentMatrix，兩者互不干擾。
+        { passive: false } + e.preventDefault() 是為了讓滾輪停在螺旋上時，
+        是在「縮放螺旋」，而不是把整個網頁往下捲走。
+      */
+      var zoomWrap = document.getElementById('zoomWrap');
+      var zoom = 1;
+      var zoomMin = 0.4;
+      var zoomMax = 2.4;
+      var zoomStep = 0.08;
+
+      document.querySelector('.stage').addEventListener('wheel', function (e) {
+        e.preventDefault();
+        var delta = e.deltaY > 0 ? -zoomStep : zoomStep;
+        zoom = Math.min(zoomMax, Math.max(zoomMin, zoom + delta));
+        zoomWrap.style.setProperty('--zoom', zoom);
+      }, { passive: false });
+
+      /*
         底下的控制面板（flex-wrap 練習那一塊）：
         只負責「讀使用者調了什麼 → 更新上面這兩個變數，或改 :root 的 CSS 變數」，
         跟螺旋、拖曳的核心邏輯分開放，之後想拿掉面板也不影響主體。
@@ -544,6 +624,20 @@
 
       heightInput.addEventListener('change', function (e) {
         root.style.setProperty('--ring-base-h', e.target.value + 'px');
+      });
+
+      // 互動（懸停）放大倍率：只更新變數，實際套用要等下一次滑鼠移到某一圈時才生效
+      var hoverWInput = document.getElementById('hoverWInput');
+      var hoverHInput = document.getElementById('hoverHInput');
+
+      hoverWInput.addEventListener('change', function (e) {
+        var v = parseFloat(e.target.value);
+        hoverScaleX = isNaN(v) ? 1 : v;
+      });
+
+      hoverHInput.addEventListener('change', function (e) {
+        var v = parseFloat(e.target.value);
+        hoverScaleY = isNaN(v) ? 1 : v;
       });
     })();
   </script>
