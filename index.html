@@ -123,12 +123,13 @@
       user-select: none;
       transform-style: preserve-3d;
       /*
-        米字型全方向旋轉的關鍵：同時疊加 rotateX 跟 rotateY 兩個軸，
-        --spinX 由「上下拖曳」控制（像翻滾），--spin 由「左右拖曳」控制（像左右轉），
-        兩個角度沒有上限、沒有鎖軸，隨便往哪個方向拖都會疊加對應的角度，
-        感覺就像在轉一顆球，而不是只能繞單一軸心轉。
+        真正的米字型全方向旋轉（含 ↖↘↗↙ 斜角）沒辦法用 rotateX/rotateY/rotateZ
+        三個各自獨立的角度疊加做到——那樣斜著拖的時候，轉動軸還是固定在水平或垂直，
+        只是「同時」變化，不是真的繞著跟拖曳方向垂直的那個斜軸轉。
+        這裡改成完全交給 JS 算一個旋轉矩陣（matrix3d），
+        每次拖曳都即時算出「跟拖曳方向垂直的那個軸」，繞那個軸轉，
+        不管往哪個角度拖，轉動方向永遠跟手指/滑鼠的方向一致，見下面 JS。
       */
-      transform: rotateX(var(--spinX, 10deg)) rotateY(var(--spin, 0deg));
       /* 告訴瀏覽器「這個元素的 transform 之後會一直變」，
          讓它提前準備好用顯卡加速，拖曳轉動時更順 */
       will-change: transform;
@@ -449,39 +450,49 @@
       buildRings();
 
       /*
-        拖曳邏輯（米字型全方向版）：
-        左右拖曳 → 改變 --spin（繞 Y 軸轉，像左右旋轉）
-        上下拖曳 → 改變 --spinX（繞 X 軸轉，像前後翻滾）
-        兩個角度各自獨立累加、沒有上限也不會互相鎖住，
-        往斜角拖曳就是兩個角度同時變化，疊加起來的視覺效果就是「任何方向都能轉」。
+        拖曳邏輯（真．虛擬軌跡球版，涵蓋 一丨╱＼ 米字全部八個方向）：
+        核心數學只有一句話——「轉動軸永遠垂直於你拖曳的方向」。
+        往右拖 → 軸是垂直方向 → 繞它轉就是畫面往右翻（視覺上像 rotateY）
+        往下拖 → 軸是水平方向 → 繞它轉就是畫面往下翻（視覺上像 rotateX）
+        往斜角 ↖↘↗↙ 拖 → 軸也跟著是那個斜角方向的垂直線 → 畫面沿著斜角翻滾
+        不是人為把 dx、dy 兩個角度分開算再疊加（那樣斜角方向會失真），
+        而是每一小段拖曳距離，都用 (-dy, dx) 這個「垂直於拖曳方向」的向量當轉軸，
+        用瀏覽器內建的 DOMMatrix 算出這一小段的旋轉矩陣，疊乘進目前的姿態矩陣裡，
+        直接整個矩陣套用到 transform，不會有角度公式打架或固定軸的問題。
       */
+      var currentMatrix = new DOMMatrix().rotateAxisAngle(1, 0, 0, 10); // 對應原本固定的 10 度起始傾斜
+      spinWrap.style.transform = currentMatrix.toString();
+
       var dragging = false;
-      var startX = 0;
-      var startY = 0;
-      var startDeg = 0;
-      var startDegX = 0;
-      var currentDeg = 0;
-      var currentDegX = 10; // 對應原本 .tree 固定的 rotateX(10deg) 起始傾斜角度
+      var lastX = 0;
+      var lastY = 0;
 
       spinWrap.addEventListener('pointerdown', function (e) {
         dragging = true;
-        startX = e.clientX;
-        startY = e.clientY;
-        startDeg = currentDeg;
-        startDegX = currentDegX;
+        lastX = e.clientX;
+        lastY = e.clientY;
         spinWrap.classList.add('dragging');
         spinWrap.setPointerCapture(e.pointerId);
       });
 
       spinWrap.addEventListener('pointermove', function (e) {
         if (!dragging) return;
-        var dx = e.clientX - startX;
-        var dy = e.clientY - startY;
-        currentDeg = startDeg + dx * sensitivity;
-        // 往下拖 → 角度減少（像把球的上緣往後翻）；往上拖則相反，符合直覺的拖曳方向
-        currentDegX = startDegX - dy * sensitivity;
-        spinWrap.style.setProperty('--spin', currentDeg + 'deg');
-        spinWrap.style.setProperty('--spinX', currentDegX + 'deg');
+        var dx = e.clientX - lastX;
+        var dy = e.clientY - lastY;
+        lastX = e.clientX;
+        lastY = e.clientY;
+        if (dx === 0 && dy === 0) return;
+
+        // 轉軸 (-dy, dx, 0)：永遠垂直於這一小段的拖曳方向，這就是米字八方向的關鍵
+        var axisX = -dy;
+        var axisY = dx;
+        var angle = Math.sqrt(dx * dx + dy * dy) * sensitivity;
+
+        var step = new DOMMatrix().rotateAxisAngle(axisX, axisY, 0, angle);
+        // 疊乘的順序是「新的這一小段」乘在左邊：用世界座標疊加，
+        // 不管現在已經轉到什麼角度，拖曳方向跟畫面方向永遠對得上，不會轉著轉著就錯亂
+        currentMatrix = step.multiply(currentMatrix);
+        spinWrap.style.transform = currentMatrix.toString();
       });
 
       function endDrag() {
